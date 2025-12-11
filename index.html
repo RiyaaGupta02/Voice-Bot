@@ -1,0 +1,715 @@
+<!--This single file contains UI, CSS and JavaScript. It records using the browser MediaRecorder API, sends audio to /process_voice as multipart/form-data, 
+receives the base64 audio in JSON, decodes it to a blob and plays it. It shows the transcript and bot response.
+All of it goes into app.py-->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Real Estate Voice Call Bot - Natural Conversations</title>
+
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: 'Segoe UI', Inter, system-ui, sans-serif;
+    background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+  }
+  .phone {
+    width: 400px;
+    max-width: 100%;
+    background: linear-gradient(145deg, #1a1a1a 0%, #0d0d0d 100%);
+    border-radius: 40px;
+    padding: 32px 24px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.05);
+    display: flex;
+    flex-direction: column;
+    color: #fff;
+    min-height: 750px;
+  }
+  .call-header {
+    text-align: center;
+    margin-bottom: 20px;
+  }
+  .title {
+    font-size: 26px;
+    font-weight: 700;
+    background: linear-gradient(135deg, #ff6b6b 0%, #ff8e53 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 8px;
+  }
+  .subtitle {
+    opacity: 0.6;
+    font-size: 13px;
+    color: #a0a0a0;
+  }
+  .api-key-section {
+    margin: 15px 0;
+  }
+  #grokKeyInput {
+    width: 100%;
+    padding: 14px 18px;
+    border: 1px solid #333;
+    border-radius: 14px;
+    background: #1a1a1a;
+    color: #fff;
+    font-size: 14px;
+    outline: none;
+    transition: all 0.3s ease;
+  }
+  #grokKeyInput:focus {
+    border-color: #ff6b6b;
+    box-shadow: 0 0 0 3px rgba(255, 107, 107, 0.1);
+  }
+  .call-controls {
+    margin: 25px 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 20px;
+  }
+  .call-btn {
+    width: 90px;
+    height: 90px;
+    border-radius: 50%;
+    border: none;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 4px;
+    transition: all 0.3s ease;
+    position: relative;
+  }
+  .start-call-btn {
+    background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+    color: white;
+    box-shadow: 0 8px 30px rgba(76, 175, 80, 0.4);
+  }
+  .start-call-btn:hover:not(:disabled) {
+    transform: scale(1.08);
+    box-shadow: 0 12px 40px rgba(76, 175, 80, 0.6);
+  }
+  .end-call-btn {
+    background: linear-gradient(135deg, #ff4444 0%, #cc0000 100%);
+    color: white;
+    box-shadow: 0 8px 30px rgba(255, 68, 68, 0.4);
+  }
+  .end-call-btn:hover:not(:disabled) {
+    transform: scale(1.08);
+    box-shadow: 0 12px 40px rgba(255, 68, 68, 0.6);
+  }
+  .call-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: scale(0.95);
+  }
+  .call-btn .icon {
+    font-size: 24px;
+  }
+  .call-btn .label {
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .status {
+    margin: 15px 0;
+    font-size: 13px;
+    color: #888;
+    text-align: center;
+    padding: 10px 18px;
+    background: #1a1a1a;
+    border-radius: 20px;
+    border: 1px solid #2a2a2a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 42px;
+  }
+  .status.connected { 
+    color: #4CAF50; 
+    border-color: #4CAF50; 
+    background: rgba(76, 175, 80, 0.1); 
+  }
+  .status.listening { 
+    color: #2196F3; 
+    border-color: #2196F3; 
+    background: rgba(33, 150, 243, 0.1); 
+  }
+  .status.processing { 
+    color: #ffa500; 
+    border-color: #ffa500; 
+    background: rgba(255, 165, 0, 0.1); 
+  }
+  .status.speaking { 
+    color: #9C27B0; 
+    border-color: #9C27B0; 
+    background: rgba(156, 39, 176, 0.1); 
+  }
+  .pulse-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: pulse 1.5s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(1.2); }
+  }
+  .log {
+    margin-top: auto;
+    height: 320px;
+    overflow-y: auto;
+    padding: 14px;
+    background: #0d0d0d;
+    border-radius: 18px;
+    border: 1px solid #2a2a2a;
+    scrollbar-width: thin;
+    scrollbar-color: #333 #0d0d0d;
+  }
+  .log::-webkit-scrollbar {
+    width: 6px;
+  }
+  .log::-webkit-scrollbar-track {
+    background: #0d0d0d;
+  }
+  .log::-webkit-scrollbar-thumb {
+    background: #333;
+    border-radius: 3px;
+  }
+  .entry {
+    margin-bottom: 14px;
+    padding: 12px;
+    background: #1a1a1a;
+    border-radius: 12px;
+    border-left: 3px solid #333;
+    animation: slideIn 0.3s ease;
+  }
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .entry.user { border-left-color: #2196F3; }
+  .entry.bot { border-left-color: #9C27B0; }
+  .entry.system { border-left-color: #4CAF50; }
+  .entry.error { background: rgba(255, 50, 50, 0.1); border-left-color: #ff3232; }
+  .entry .who {
+    font-weight: 600;
+    font-size: 11px;
+    color: #999;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 6px;
+  }
+  .entry .txt {
+    font-size: 14px;
+    line-height: 1.6;
+    color: #e5e7eb;
+  }
+  .entry .meta {
+    margin-top: 8px;
+    font-size: 10px;
+    color: #666;
+    font-style: italic;
+  }
+  .warning {
+    padding: 12px;
+    background: rgba(255, 165, 0, 0.1);
+    border: 1px solid #ffa500;
+    border-radius: 10px;
+    color: #ffa500;
+    font-size: 12px;
+    text-align: center;
+    margin-top: 12px;
+  }
+  .spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid #333;
+    border-top-color: currentColor;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+  .stats {
+    display: flex;
+    justify-content: space-around;
+    margin: 15px 0;
+    padding: 12px;
+    background: #1a1a1a;
+    border-radius: 12px;
+    font-size: 11px;
+  }
+  .stats .stat {
+    text-align: center;
+  }
+  .stats .stat-value {
+    font-size: 18px;
+    font-weight: 700;
+    color: #4CAF50;
+  }
+  .stats .stat-label {
+    color: #888;
+    margin-top: 4px;
+  }
+</style>
+</head>
+
+<body>
+<div class="phone">
+  <div class="call-header">
+    <div class="title">🏠 Real Estate Voice Bot</div>
+    <div class="subtitle">Natural Phone Conversations</div>
+  </div>
+
+  <div class="api-key-section">
+    <input 
+      id="grokKeyInput" 
+      type="password"
+      placeholder="🔑 Enter your Groq API Key" 
+      autocomplete="off"
+    />
+    <div id="apiWarning" class="warning" style="display:none;">
+      Please enter your Groq API key to start
+    </div>
+  </div>
+
+  <div class="call-controls">
+    <button id="btnStartCall" class="call-btn start-call-btn">
+      <span class="icon">📞</span>
+      <span class="label">Start Call</span>
+    </button>
+
+    <button id="btnEndCall" class="call-btn end-call-btn" disabled>
+      <span class="icon">❌</span>
+      <span class="label">End Call</span>
+    </button>
+  </div>
+
+  <div id="status" class="status">Ready to connect</div>
+
+  <div id="stats" class="stats" style="display:none;">
+    <div class="stat">
+      <div class="stat-value" id="turnCount">0</div>
+      <div class="stat-label">Exchanges</div>
+    </div>
+    <div class="stat">
+      <div class="stat-value" id="duration">0:00</div>
+      <div class="stat-label">Duration</div>
+    </div>
+  </div>
+
+  <div class="log" id="log">
+    <div class="entry system">
+      <div class="who">System</div>
+      <div class="txt">👋 Welcome! Press "Start Call" to begin a natural conversation.</div>
+      <div class="meta">Speak naturally and pause when you're done. The bot responds just like a real phone call.</div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+(async function () {
+  const btnStartCall = document.getElementById('btnStartCall');
+  const btnEnd = document.getElementById('btnEndCall');
+  const status = document.getElementById('status');
+  const log = document.getElementById('log');
+  const keyInput = document.getElementById('grokKeyInput');
+  const warning = document.getElementById('apiWarning');
+  const stats = document.getElementById('stats');
+  const turnCount = document.getElementById('turnCount');
+  const durationEl = document.getElementById('duration');
+
+  let mediaRecorder = null;
+  let audioChunks = [];
+  let processing = false;
+  let active = false;
+  let sessionId = null;
+  let stream = null;
+  let silenceTimer = null;
+  let isBotSpeaking = false;
+  let turnCounter = 0;
+  let startTime = null;
+  let durationInterval = null;
+  let lastProcessedResponseId = null;  // Prevent duplicate UI updates
+
+  // OPTIMIZED TIMINGS for natural phone conversations
+  const SILENCE_THRESHOLD_MS = 1500;    // Wait 1.5s of silence before sending
+  const VAD_CHECK_INTERVAL_MS = 500;    // Check for silence every 500ms
+  const CHUNK_TIMESLICE_MS = 300;       // Get audio data every 300ms
+  const MIN_AUDIO_SIZE = 8000;          // Minimum audio size to process (~0.5s of speech)
+
+  function logEntry(who, text, meta = "", error = false) {
+    const e = document.createElement('div');
+    e.className = `entry ${who.includes('You')?'user':who.includes('Bot')?'bot':'system'} ${error?'error':''}`;
+    e.innerHTML = `<div class="who">${who}</div><div class="txt">${text}</div>${meta?`<div class="meta">${meta}</div>`:''}`;
+    log.appendChild(e);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function setStatus(txt, cls = "idle", showPulse = false) {
+    status.innerHTML = showPulse ? `${txt} <span class="pulse-dot"></span>` : txt;
+    status.className = "status " + cls;
+  }
+
+  function updateStats() {
+    if (!startTime) return;
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const mins = Math.floor(elapsed / 60);
+    const secs = elapsed % 60;
+    durationEl.textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+  }
+
+  async function playAudio(b64, mime = "audio/wav") {
+    return new Promise((resolve, reject) => {
+      try {
+        const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+        const blob = new Blob([bytes], {type: mime});
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+
+        isBotSpeaking = true;
+        
+        // Pause recording while bot speaks
+        if (mediaRecorder?.state === "recording") {
+          mediaRecorder.pause();
+          console.log("🎙️ Recording paused - bot speaking");
+        }
+
+        audio.onended = () => {
+          URL.revokeObjectURL(url);
+          isBotSpeaking = false;
+          
+          // Resume recording after bot finishes
+          if (active && mediaRecorder?.state === "paused") {
+            mediaRecorder.resume();
+            console.log("🎙️ Recording resumed - your turn");
+            setStatus("Listening – your turn to speak", "listening", true);
+          }
+          resolve();
+        };
+        
+        audio.onerror = (e) => { 
+          console.error("Audio playback error:", e);
+          isBotSpeaking = false; 
+          reject(e); 
+        };
+        
+        audio.play();
+      } catch (e) {
+        console.error("Audio setup error:", e);
+        isBotSpeaking = false;
+        reject(e);
+      }
+    });
+  }
+
+  async function playWelcome() {
+    const text = "Hi! Welcome to Ahmedabad Real Estate. I'm your voice assistant. How can I help you find your perfect property today?";
+    logEntry("Bot", text, "Welcome message");
+    setStatus("Bot speaking...", "speaking");
+
+    try {
+      const f = new FormData();
+      f.append("text", text);
+      const r = await fetch("/synthesize_tts", {method: "POST", body: f});
+      const d = await r.json();
+      
+      if (d.audio_b64) {
+        await playAudio(d.audio_b64);
+      }
+    } catch (e) {
+      console.error("Welcome TTS failed:", e);
+    }
+
+    setStatus("Listening – speak now", "listening", true);
+  }
+
+  async function processFullUtterance(blob) {
+    if (processing || !active || isBotSpeaking || blob.size < MIN_AUDIO_SIZE) {
+      console.log("⏭️ Skipping processing:", {processing, active, isBotSpeaking, size: blob.size});
+      return;
+    }
+
+    processing = true;
+    setStatus("Processing your message...", "processing");
+    console.log("🔄 Processing utterance:", blob.size, "bytes");
+
+    const fd = new FormData();
+    fd.append("file", blob, "utterance.webm");
+    fd.append("grok_api_key", keyInput.value.trim());
+    fd.append("session_id", sessionId);
+
+    try {
+      const res = await fetch("/process_voice", {method: "POST", body: fd});
+      if (!res.ok) {
+        throw new Error(`Server error: ${res.status}`);
+      }
+
+      const data = await res.json();
+      console.log("📦 Server response:", data);
+
+      // Handle various response types
+      if (data.duplicate_request || data.duplicate_response) {
+        console.log("⚠️ Duplicate detected, ignoring");
+        processing = false;
+        setStatus("Listening – your turn", "listening", true);
+        return;
+      }
+
+      if (data.no_speech || data.too_short) {
+        console.log("🤐 No speech detected");
+        processing = false;
+        setStatus("Listening – speak when ready", "listening", true);
+        return;
+      }
+
+      // Prevent duplicate UI updates using response_id
+      if (data.response_id && data.response_id === lastProcessedResponseId) {
+        console.log("⚠️ Duplicate response_id, skipping UI update");
+        processing = false;
+        return;
+      }
+
+      // Update conversation
+      if (data.transcript?.trim()) {
+        logEntry("You", data.transcript);
+        turnCounter++;
+        turnCount.textContent = turnCounter;
+      }
+
+      if (data.response_text?.trim()) {
+        logEntry("Bot", data.response_text);
+        lastProcessedResponseId = data.response_id;  // Track this response
+        
+        if (data.audio_b64) {
+          setStatus("Bot responding...", "speaking");
+          await playAudio(data.audio_b64);
+        } else {
+          setStatus("Listening – your turn", "listening", true);
+        }
+      }
+
+    } catch (e) {
+      console.error("❌ Processing error:", e);
+      logEntry("Error", "Connection issue. Please try again.", "", true);
+      setStatus("Error – try speaking again", "idle");
+    } finally {
+      processing = false;
+      if (active && !isBotSpeaking) {
+        setStatus("Listening – your turn", "listening", true);
+      }
+    }
+  }
+
+  function startConversation() {
+    if (!mediaRecorder || !active) return;
+
+    audioChunks = [];
+    mediaRecorder.start(CHUNK_TIMESLICE_MS);
+    console.log("🎙️ Recording started with", CHUNK_TIMESLICE_MS, "ms chunks");
+
+    let consecutiveSilenceChecks = 0;
+    const requiredSilenceChecks = Math.ceil(SILENCE_THRESHOLD_MS / VAD_CHECK_INTERVAL_MS);
+
+    const checkForSilence = async () => {
+      if (!active || processing || isBotSpeaking) {
+        if (active) setTimeout(checkForSilence, VAD_CHECK_INTERVAL_MS);
+        return;
+      }
+
+      if (audioChunks.length === 0) {
+        consecutiveSilenceChecks = 0;
+        setTimeout(checkForSilence, VAD_CHECK_INTERVAL_MS);
+        return;
+      }
+
+      // Create probe blob from recent chunks (last 1-2 seconds)
+      const probeChunks = audioChunks.slice(-6);  // Last ~1.8s of audio
+      const probeBlob = new Blob(probeChunks, {type: "audio/webm"});
+
+      try {
+        const fd = new FormData();
+        fd.append("file", probeBlob);
+        fd.append("session_id", sessionId || "");
+
+        const res = await fetch("/vad_check", {method: "POST", body: fd});
+        const data = await res.json();
+
+        if (data.has_speech) {
+          // Still speaking - reset silence counter
+          consecutiveSilenceChecks = 0;
+          console.log("🗣️ Speech detected, continuing...");
+        } else {
+          // Silence detected
+          consecutiveSilenceChecks++;
+          console.log(`🤫 Silence check ${consecutiveSilenceChecks}/${requiredSilenceChecks}`);
+
+          if (consecutiveSilenceChecks >= requiredSilenceChecks) {
+            // Enough silence - process the full utterance
+            console.log("✅ User finished speaking - processing full utterance");
+            const fullBlob = new Blob(audioChunks, {type: "audio/webm"});
+            audioChunks = [];  // Clear buffer
+            consecutiveSilenceChecks = 0;
+            await processFullUtterance(fullBlob);
+          }
+        }
+      } catch (e) {
+        console.warn("VAD check failed:", e);
+      }
+
+      if (active) setTimeout(checkForSilence, VAD_CHECK_INTERVAL_MS);
+    };
+
+    // Start silence detection loop
+    setTimeout(checkForSilence, VAD_CHECK_INTERVAL_MS);
+  }
+
+  // ============ START CALL ============
+  btnStartCall.onclick = async () => {
+    const key = keyInput.value.trim();
+    if (!key) {
+      warning.style.display = "block";
+      return;
+    }
+
+    warning.style.display = "none";
+    setStatus("Connecting...", "processing");
+
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+
+      sessionId = "sess_" + Date.now() + "_" + Math.random().toString(36).substr(2, 9);
+      active = true;
+      turnCounter = 0;
+      startTime = Date.now();
+      lastProcessedResponseId = null;
+
+      btnStartCall.disabled = true;
+      btnEnd.disabled = false;
+      stats.style.display = "flex";
+
+      // Start duration timer
+      durationInterval = setInterval(updateStats, 1000);
+
+      mediaRecorder = new MediaRecorder(stream, {
+        mimeType: "audio/webm;codecs=opus",
+        audioBitsPerSecond: 16000
+      });
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          audioChunks.push(e.data);
+        }
+      };
+
+      logEntry("System", "✅ Call connected successfully", "Session started");
+      setStatus("Connected", "connected");
+
+      await playWelcome();
+
+      // Start conversation loop
+      setTimeout(() => startConversation(), 1000);
+
+    } catch (e) {
+      console.error("Microphone error:", e);
+      logEntry("Error", "Could not access microphone. Please check permissions.", "", true);
+      setStatus("Error – microphone access denied", "idle");
+      active = false;
+      btnStartCall.disabled = false;
+    }
+  };
+
+  // ============ END CALL ============
+  btnEnd.onclick = async () => {
+    active = false;
+    processing = false;
+    
+    if (silenceTimer) clearTimeout(silenceTimer);
+    if (durationInterval) clearInterval(durationInterval);
+    if (mediaRecorder) mediaRecorder.stop();
+    if (stream) stream.getTracks().forEach(t => t.stop());
+
+    setStatus("Ending call...", "processing");
+    console.log("📞 Ending call for session:", sessionId);
+
+    try {
+      const f = new FormData();
+      f.append("session_id", sessionId || "");
+      const r = await fetch("/end_session", {method: "POST", body: f});
+      const d = await r.ok ? await r.json() : {};
+
+      if (d.message) {
+        logEntry("Bot", d.message, 
+          d.total_queries ? `${d.total_queries} exchanges • ${Math.floor(d.duration_seconds/60)}m ${d.duration_seconds%60}s` : ""
+        );
+        
+        if (d.audio_b64) {
+          await playAudio(d.audio_b64);
+        }
+      }
+    } catch (e) {
+      console.error("End session error:", e);
+      logEntry("System", "Call ended", "");
+    }
+
+    setStatus("Call ended – thanks for connecting!", "idle");
+    btnStartCall.disabled = false;
+    btnEnd.disabled = true;
+    stats.style.display = "none";
+    sessionId = null;
+    audioChunks = [];
+    turnCounter = 0;
+    startTime = null;
+    lastProcessedResponseId = null;
+  };
+
+  // Health check on load
+  fetch("/ping")
+    .then(r => r.json())
+    .then(d => {
+      console.log("Backend status:", d);
+      logEntry("System", `✅ Backend ready • ${d.active_sessions || 0} active calls`, 
+        d.features ? d.features.join(" • ") : "");
+    })
+    .catch(e => {
+      console.error("Backend check failed:", e);
+      logEntry("System", "⚠️ Could not connect to backend", "", true);
+    });
+
+})();
+</script>
+</body>
+</html>
+
+<!-- About the Frontend working 
+Press Start Recording, speak, then Stop & Send.
+
+The browser records audio/webm (MediaRecorder default), sends it as file to /process_voice.
+
+Backend reads file, writes to temp file, runs existing transcribe_audio(path), deletes temp file, responds JSON with audio_b64.
+
+Frontend decodes audio_b64 and plays the audio in the browser.
+
+No audio is stored server-side permanently. -->
