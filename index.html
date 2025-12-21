@@ -347,6 +347,8 @@ All of it goes into app.py-->
   let startTime = null;
   let durationInterval = null;
   let lastProcessedResponseId = null;  // Prevent duplicate UI updates
+  let silenceCheckInterval = null;
+  let isChecking = false; // var to work --> LOCK --> made to prevent concurrent silence checks
 
   // OPTIMIZED TIMINGS for natural phone conversations
   const SILENCE_THRESHOLD_MS = 1500;    // Wait 1.5s of silence before sending
@@ -518,67 +520,62 @@ All of it goes into app.py-->
   }
 
   function startConversation() {
-    if (!mediaRecorder || !active) return;
+  if (!mediaRecorder || !active) return;
 
-    audioChunks = [];
-    mediaRecorder.start(CHUNK_TIMESLICE_MS);
-    console.log("🎙️ Recording started with", CHUNK_TIMESLICE_MS, "ms chunks");
+  audioChunks = [];
+  mediaRecorder.start(CHUNK_TIMESLICE_MS);
+  console.log("🎙️ Recording started with", CHUNK_TIMESLICE_MS, "ms chunks");
 
-    let consecutiveSilenceChecks = 0;
-    const requiredSilenceChecks = Math.ceil(SILENCE_THRESHOLD_MS / VAD_CHECK_INTERVAL_MS);
+  let consecutiveSilenceChecks = 0;
+  const requiredSilenceChecks = Math.ceil(SILENCE_THRESHOLD_MS / VAD_CHECK_INTERVAL_MS);
 
-    const checkForSilence = async () => {
-      if (!active || processing || isBotSpeaking) {
-        if (active) setTimeout(checkForSilence, VAD_CHECK_INTERVAL_MS);
-        return;
-      }
+  silenceCheckInterval = setInterval(async () => {
+    if (isChecking || !active || processing || isBotSpeaking) {
+      return;  // Skip if already checking or invalid state
+    }
 
+    isChecking = true;  // Lock
+
+    try {
       if (audioChunks.length === 0) {
         consecutiveSilenceChecks = 0;
-        setTimeout(checkForSilence, VAD_CHECK_INTERVAL_MS);
         return;
       }
 
-      // Create probe blob from recent chunks (last 1-2 seconds)
-      const probeChunks = audioChunks.slice(-6);  // Last ~1.8s of audio
+      // Probe last ~1.8s
+      const probeChunks = audioChunks.slice(-6);
       const probeBlob = new Blob(probeChunks, {type: "audio/webm"});
 
-      try {
-        const fd = new FormData();
-        fd.append("file", probeBlob);
-        fd.append("session_id", sessionId || "");
+      const fd = new FormData();
+      fd.append("file", probeBlob);
+      fd.append("session_id", sessionId || "");
 
-        const res = await fetch("/vad_check", {method: "POST", body: fd});
-        const data = await res.json();
+      const res = await fetch("/vad_check", {method: "POST", body: fd});
+      const data = await res.json();
 
-        if (data.has_speech) {
-          // Still speaking - reset silence counter
+      if (data.has_speech) {
+        consecutiveSilenceChecks = 0;
+        console.log("🗣️ Speech detected, continuing...");
+      } else {
+        consecutiveSilenceChecks++;
+        console.log(`🤫 Silence check ${consecutiveSilenceChecks}/${requiredSilenceChecks}`);
+
+        if (consecutiveSilenceChecks >= requiredSilenceChecks) {
+          console.log("✅ User finished speaking - processing full utterance");
+          const fullBlob = new Blob(audioChunks, {type: "audio/webm"});
+          audioChunks = [];  // Clear
           consecutiveSilenceChecks = 0;
-          console.log("🗣️ Speech detected, continuing...");
-        } else {
-          // Silence detected
-          consecutiveSilenceChecks++;
-          console.log(`🤫 Silence check ${consecutiveSilenceChecks}/${requiredSilenceChecks}`);
-
-          if (consecutiveSilenceChecks >= requiredSilenceChecks) {
-            // Enough silence - process the full utterance
-            console.log("✅ User finished speaking - processing full utterance");
-            const fullBlob = new Blob(audioChunks, {type: "audio/webm"});
-            audioChunks = [];  // Clear buffer
-            consecutiveSilenceChecks = 0;
-            await processFullUtterance(fullBlob);
-          }
+          await processFullUtterance(fullBlob);
         }
-      } catch (e) {
-        console.warn("VAD check failed:", e);
       }
+    } catch (e) {
+      console.warn("VAD check failed:", e);
+    } finally {
+      isChecking = false;  // Unlock
+    }
+  }, VAD_CHECK_INTERVAL_MS);
+}
 
-      if (active) setTimeout(checkForSilence, VAD_CHECK_INTERVAL_MS);
-    };
-
-    // Start silence detection loop
-    setTimeout(checkForSilence, VAD_CHECK_INTERVAL_MS);
-  }
 
   // ============ START CALL ============
   btnStartCall.onclick = async () => {
@@ -648,6 +645,10 @@ All of it goes into app.py-->
     
     if (silenceTimer) clearTimeout(silenceTimer);
     if (durationInterval) clearInterval(durationInterval);
+    if (silenceCheckInterval) {  // 🔴 ADD THIS BLOCK
+    clearInterval(silenceCheckInterval);
+    silenceCheckInterval = null;
+  }
     if (mediaRecorder) mediaRecorder.stop();
     if (stream) stream.getTracks().forEach(t => t.stop());
 
